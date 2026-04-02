@@ -133,6 +133,35 @@ nav{position:sticky;top:0;z-index:60;height:52px;display:flex;align-items:center
 
 .up-col{color:var(--mint)}.dn-col{color:var(--coral)}
 .av{border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:700}
+
+/* COMING SOON COMPOSE */
+.compose-soon{background:var(--s1);border:1px solid var(--b1);border-radius:12px;padding:20px;margin-bottom:14px;position:relative;overflow:hidden}
+.compose-soon::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(109,92,255,.03),rgba(29,155,240,.03));pointer-events:none}
+.compose-soon-inner{position:relative;display:flex;align-items:center;gap:14px}
+.compose-soon-icon{width:42px;height:42px;border-radius:10px;background:var(--accent-dim);border:1px solid rgba(109,92,255,.18);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.compose-soon-text{flex:1}
+.compose-soon-title{font-size:13px;font-weight:600;color:#e0e0f0;margin-bottom:3px}
+.compose-soon-sub{font-size:11px;color:var(--text2);line-height:1.5}
+.compose-soon-badge{padding:4px 10px;border-radius:5px;background:rgba(109,92,255,.08);border:1px solid rgba(109,92,255,.15);font-size:10px;font-weight:700;color:var(--accent-b);letter-spacing:.04em;white-space:nowrap}
+
+/* TIP BOX */
+.tip-box{background:var(--s1);border:1px solid var(--b1);border-radius:12px;padding:16px;overflow:hidden;position:relative}
+.tip-box::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--mint))}
+.tip-title{font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.tip-title span{font-size:14px}
+.tip-desc{font-size:11px;color:var(--text3);line-height:1.6;margin-bottom:12px}
+.tip-amounts{display:flex;gap:6px;margin-bottom:10px}
+.tip-amt{flex:1;padding:8px 4px;background:var(--s2);border:1px solid var(--b1);border-radius:7px;text-align:center;cursor:pointer;transition:all .2s;font-family:var(--fm);font-size:12px;font-weight:600;color:var(--text2)}
+.tip-amt:hover{border-color:var(--accent);color:var(--accent-b);background:var(--accent-dim)}
+.tip-amt.selected{border-color:var(--accent);color:var(--accent-b);background:var(--accent-dim)}
+.tip-custom{display:flex;gap:6px;margin-bottom:10px}
+.tip-input{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:7px;padding:8px 10px;font-size:12px;color:var(--text);outline:none;font-family:var(--fm);transition:border-color .2s}
+.tip-input:focus{border-color:var(--accent)}
+.tip-input::placeholder{color:var(--text3)}
+.tip-send{width:100%;padding:10px;background:linear-gradient(135deg,var(--accent),#8577ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;font-family:var(--f);display:flex;align-items:center;justify-content:center;gap:6px}
+.tip-send:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(109,92,255,.3)}
+.tip-send:disabled{opacity:.4;cursor:default;transform:none;box-shadow:none}
+.tip-footer{margin-top:8px;font-size:9px;color:var(--text3);text-align:center}
 </style>
 </head>
 <body>
@@ -434,7 +463,10 @@ function renderSidebar(){
   });
   priceHtml+='</div>';
 
-  return walletHtml+priceHtml;
+  // Tip box
+  let tipHtml='<div class="tip-box"><div class="tip-title"><span>◎</span> Send Love</div><div class="tip-desc">MemCom is an open-source public good for the Solana meme ecosystem. Support the builders.</div><div class="tip-amounts"><div class="tip-amt" onclick="selectTip(0.01)">0.01 ◎</div><div class="tip-amt" onclick="selectTip(0.05)">0.05 ◎</div><div class="tip-amt" onclick="selectTip(0.1)">0.1 ◎</div><div class="tip-amt" onclick="selectTip(0.5)">0.5 ◎</div></div><div class="tip-custom"><input class="tip-input" id="tip-amount" type="number" step="0.001" min="0.001" placeholder="Custom SOL amount" oninput="tipAmount=parseFloat(this.value)||0"></div><button class="tip-send" id="tip-btn" onclick="sendTip()" '+(W.connected?"":"disabled")+'>◎ Send'+(W.connected?"":" (connect wallet)")+'</button><div class="tip-footer">100% goes to builders · Tx on Solana mainnet</div></div>';
+
+  return walletHtml+priceHtml+tipHtml;
 }
 
 function getFilteredPosts(){
@@ -461,12 +493,16 @@ function render(){
   }
 
   const posts=getFilteredPosts();
+
+  // Coming Soon compose box
+  const composeHtml='<div class="compose-soon"><div class="compose-soon-inner"><div class="compose-soon-icon">⬡</div><div class="compose-soon-text"><div class="compose-soon-title">Community posts are coming soon</div><div class="compose-soon-sub">Share alpha, start DAO votes, and drop memes — visible only to fellow holders. X Communities, but on-chain.</div></div><div class="compose-soon-badge">SOON</div></div></div>';
+
   if(posts.length===0){
-    fc.innerHTML='<div class="empty-feed"><div class="icon">⬡</div><div class="title">No posts for this filter</div><div class="sub">Try switching to "My Feed" to see all content for your holdings.</div></div>';
+    fc.innerHTML=composeHtml+'<div class="empty-feed"><div class="icon">⬡</div><div class="title">No posts for this filter</div><div class="sub">Try switching to "My Feed" to see all content for your holdings.</div></div>';
     return;
   }
 
-  fc.innerHTML='<div class="feed">'+posts.map((p,i)=>renderPost(p,i)).join("")+'</div>';
+  fc.innerHTML=composeHtml+'<div class="feed">'+posts.map((p,i)=>renderPost(p,i)).join("")+'</div>';
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -480,6 +516,114 @@ function showModal(){
   document.getElementById("modal").innerHTML='<div class="modal-bg" onclick="closeModal()"><div class="modal-panel" onclick="event.stopPropagation()"><div class="modal-h"><div><div class="modal-title">Connect Wallet</div><div class="modal-sub">Your holdings become your feed</div></div><button class="btn-x" onclick="closeModal()">✕</button></div>'+ws.map(w=>'<button class="w-opt" onclick="'+(w.provider?"connectWallet(detectWallets().find(x=>x.name===\'"+w.name+"\')?.provider,\'"+w.name+"\')":(w.link?"window.open(\'"+w.link+"\',\'_blank\');closeModal()":"toast(\'Not detected\',\'e\')"))+'">'+'<div class="w-ico">'+w.icon+'</div><div><div class="w-name">'+w.name+'</div><div class="w-desc">'+w.desc+'</div></div><span style="margin-left:auto;color:var(--text3)">'+(w.link?"↗":"→")+'</span></button>').join('')+'<div class="modal-note">Read-only access. We scan your token accounts to build your feed.</div></div></div>';
 }
 function closeModal(){document.getElementById("modal").innerHTML="";}
+
+// ══════════════════════════════════════════════════════════════
+// TIP / SEND LOVE
+// ══════════════════════════════════════════════════════════════
+const TIP_WALLET="F3gJbtTRakzFELAhToKt7S56oqYPeSzTZqcSNC65oWgj";
+let tipAmount=0;
+
+function selectTip(amt){
+  tipAmount=amt;
+  const inp=document.getElementById("tip-amount");
+  if(inp)inp.value=amt;
+  // Highlight selected
+  document.querySelectorAll(".tip-amt").forEach(el=>{
+    el.classList.toggle("selected",parseFloat(el.textContent)===amt);
+  });
+}
+
+async function sendTip(){
+  if(!W.connected){toast("Connect wallet first","e");showModal();return;}
+  if(!tipAmount||tipAmount<=0){toast("Enter an amount","e");return;}
+  if(tipAmount>W.sol){toast("Insufficient SOL balance","e");return;}
+
+  try{
+    toast("Opening wallet...","i");
+    const lamports=Math.floor(tipAmount*1e9);
+    
+    // Get recent blockhash
+    const bhRes=await fetch(RPC,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:99,method:"getLatestBlockhash",params:[{commitment:"finalized"}]})});
+    const bhData=await bhRes.json();
+    const blockhash=bhData.result.value.blockhash;
+
+    // Build raw transaction bytes (minimal SOL transfer)
+    const fromKey=bs58decode(W.pubkey);
+    const toKey=bs58decode(TIP_WALLET);
+    const programId=bs58decode("11111111111111111111111111111111");
+
+    // Transaction format: signatures_count(1) + signature(64) + message
+    // Message: header(3) + keys_count + keys + blockhash + instructions_count + instruction
+    const numKeys=3; // from, to, system_program
+    const dataBytes=new Uint8Array(12); // transfer instruction: type(4LE=2) + lamports(8LE)
+    const dv=new DataView(dataBytes.buffer);
+    dv.setUint32(0,2,true); // SystemInstruction::Transfer = 2
+    dv.setBigUint64(4,BigInt(lamports),true);
+
+    // Compact message
+    const msg=new Uint8Array(3+1+(numKeys*32)+32+1+1+1+1+dataBytes.length);
+    let o=0;
+    msg[o++]=1; // num required signatures
+    msg[o++]=0; // num readonly signed
+    msg[o++]=1; // num readonly unsigned (system program)
+    msg[o++]=numKeys; // account keys count
+    msg.set(fromKey,o);o+=32;
+    msg.set(toKey,o);o+=32;
+    msg.set(programId,o);o+=32;
+    // Recent blockhash (32 bytes)
+    const bhBytes=bs58decode(blockhash);
+    msg.set(bhBytes,o);o+=32;
+    msg[o++]=1; // instructions count
+    // Instruction: program_id_index, accounts_count, account_indices, data_length, data
+    msg[o++]=2; // program id index (system program)
+    msg[o++]=2; // accounts count
+    msg[o++]=0; // from index
+    msg[o++]=1; // to index
+    msg[o++]=dataBytes.length;
+    msg.set(dataBytes,o);o+=dataBytes.length;
+
+    const message=msg.slice(0,o);
+
+    // Full transaction: 1 byte sig count + 64 bytes empty sig + message
+    const tx=new Uint8Array(1+64+message.length);
+    tx[0]=1; // signature count
+    // signature bytes left as 0 (will be filled by wallet)
+    tx.set(message,65);
+
+    // Send via Phantom
+    const {signature}=await W.provider.signAndSendTransaction({
+      serialize:()=>tx,
+      signatures:[{publicKey:{toBytes:()=>fromKey},signature:null}],
+      message:{serialize:()=>message},
+    });
+
+    toast("Sent "+tipAmount+" SOL! Thank you ♥","s");
+    console.log("Tip tx:",signature);
+    tipAmount=0;
+    const inp=document.getElementById("tip-amount");
+    if(inp)inp.value="";
+    document.querySelectorAll(".tip-amt").forEach(el=>el.classList.remove("selected"));
+    setTimeout(async()=>{try{const r=await fetch(RPC,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"getBalance",params:[W.pubkey,{commitment:"confirmed"}]})});const d=await r.json();W.sol=(d.result?.value||0)/1e9;updateBtn("connected");render();}catch(e){}},4000);
+  }catch(e){
+    console.error("Tip error:",e);
+    if(e.code===4001||e.message?.includes("reject"))toast("Transaction cancelled","i");
+    else toast("Failed: "+(e.message||"error"),"e");
+  }
+}
+
+// Base58 decoder
+function bs58decode(str){
+  const ALPHABET="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const bytes=[];let carry;
+  for(let i=0;i<str.length;i++){
+    let c=ALPHABET.indexOf(str[i]);
+    if(c<0)throw new Error("Invalid base58");
+    for(let j=0;j<bytes.length;j++){c+=bytes[j]*58;bytes[j]=c&0xff;c>>=8;}
+    while(c>0){bytes.push(c&0xff);c>>=8;}
+  }
+  for(let i=0;i<str.length&&str[i]==="1";i++)bytes.push(0);
+  return new Uint8Array(bytes.reverse());
+}
 
 // Auto-refresh prices every 30s
 setInterval(async()=>{
