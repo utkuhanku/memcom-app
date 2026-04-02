@@ -199,9 +199,9 @@ async function connectWallet(prov,name){
 
 async function loadWalletData(pk){
   // 1. SOL balance
-  try{const r=await fetch(RPC,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"getBalance",params:[pk,{commitment:"confirmed"}]})});const d=await r.json();W.sol=(d.result?.value||0)/1e9;}catch(e){}
+  try{const r=await fetch(RPC,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"getBalance",params:[pk,{commitment:"confirmed"}]})});const d=await r.json();W.sol=(d.result?.value||0)/1e9;}catch(e){console.warn("SOL balance error",e);}
 
-  // 2. ALL SPL token accounts — no hardcoded list
+  // 2. ALL SPL token accounts
   let rawHoldings=[];
   try{
     const r=await fetch(RPC,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:2,method:"getTokenAccountsByOwner",params:[pk,{programId:SPL_PROGRAM},{encoding:"jsonParsed",commitment:"confirmed"}]})});
@@ -213,63 +213,107 @@ async function loadWalletData(pk){
     });
   }catch(e){console.warn("Token fetch failed",e);}
 
-  // 3. Fetch real market data from DexScreener for ALL held tokens
+  // Also check Token-2022 program
+  try{
+    const r=await fetch(RPC,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:3,method:"getTokenAccountsByOwner",params:[pk,{programId:"TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"},{encoding:"jsonParsed",commitment:"confirmed"}]})});
+    const d=await r.json();
+    (d.result?.value||[]).forEach(acc=>{
+      const info=acc.account.data.parsed.info;
+      const amt=Number(info.tokenAmount.uiAmount||0);
+      if(amt>0) rawHoldings.push({mint:info.mint, amount:amt, decimals:info.tokenAmount.decimals});
+    });
+  }catch(e){}
+
+  console.log("Raw holdings found:",rawHoldings.length,rawHoldings.map(h=>h.mint.slice(0,8)+"..."));
+
+  // 3. Fetch metadata for ALL tokens via Helius DAS API
   MY_TOKENS=[];
   if(rawHoldings.length>0){
-    // DexScreener supports comma-separated mints (batch)
-    const mints=rawHoldings.map(h=>h.mint).join(",");
+    // 3a. Helius DAS getAssetBatch — gets name/symbol/image for ANY token
+    let assetMap={};
     try{
-      const r=await fetch("https://api.dexscreener.com/tokens/v1/solana/"+mints);
-      const pairs=await r.json();
-      // Group by base token, pick highest liquidity pair
-      const best={};
-      (Array.isArray(pairs)?pairs:[]).forEach(pair=>{
-        const m=pair.baseToken?.address;
-        if(!m)return;
-        if(!best[m]||(pair.liquidity?.usd||0)>(best[m].liquidity?.usd||0))best[m]=pair;
-      });
-      // Build MY_TOKENS from holdings + DexScreener data
-      rawHoldings.forEach(h=>{
-        const pair=best[h.mint];
-        if(pair&&pair.baseToken){
-          const price=parseFloat(pair.priceUsd)||0;
-          MY_TOKENS.push({
-            mint:h.mint,
-            symbol:pair.baseToken.symbol||"???",
-            name:pair.baseToken.name||"Unknown",
-            price:price,
-            change24h:parseFloat(pair.priceChange?.h24)||0,
-            mc:pair.marketCap||0,
-            vol:pair.volume?.h24||0,
-            fdv:pair.fdv||0,
-            amount:h.amount,
-            usdVal:price*h.amount,
-            col:stringToColor(pair.baseToken.symbol||h.mint),
-            pairAddr:pair.pairAddress||"",
-            img:pair.info?.imageUrl||"",
-          });
-        }else{
-          // Token exists on-chain but no DexScreener pair (very small/new token)
-          MY_TOKENS.push({
-            mint:h.mint,
-            symbol:h.mint.slice(0,4)+".."+h.mint.slice(-4),
-            name:"Unknown Token",
-            price:0,change24h:0,mc:0,vol:0,fdv:0,
-            amount:h.amount,usdVal:0,
-            col:stringToColor(h.mint),pairAddr:"",img:"",
+      const mints=rawHoldings.map(h=>h.mint);
+      const batchSize=100;
+      for(let i=0;i<mints.length;i+=batchSize){
+        const batch=mints.slice(i,i+batchSize);
+        const r=await fetch(RPC,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:"das-batch",method:"getAssetBatch",params:{ids:batch}})});
+        const d=await r.json();
+        if(d.result&&Array.isArray(d.result)){
+          d.result.forEach(asset=>{
+            if(asset&&asset.id){
+              assetMap[asset.id]={
+                symbol:asset.content?.metadata?.symbol||"",
+                name:asset.content?.metadata?.name||"",
+                img:asset.content?.links?.image||asset.content?.files?.[0]?.uri||"",
+              };
+            }
           });
         }
+      }
+    }catch(e){console.warn("Helius DAS failed, falling back",e);}
+
+    // 3b. DexScreener for price data — batch in chunks of 30
+    let dexBest={};
+    try{
+      const allMints=rawHoldings.map(h=>h.mint);
+      const chunkSize=30;
+      for(let i=0;i<allMints.length;i+=chunkSize){
+        const chunk=allMints.slice(i,i+chunkSize).join(",");
+        const r=await fetch("https://api.dexscreener.com/tokens/v1/solana/"+chunk);
+        if(r.ok){
+          const pairs=await r.json();
+          (Array.isArray(pairs)?pairs:[]).forEach(pair=>{
+            const m=pair.baseToken?.address;
+            if(m&&(!dexBest[m]||(pair.liquidity?.usd||0)>(dexBest[m].liquidity?.usd||0)))dexBest[m]=pair;
+          });
+        }
+        if(i+chunkSize<allMints.length) await new Promise(r=>setTimeout(r,300)); // rate limit
+      }
+    }catch(e){console.warn("DexScreener failed",e);}
+
+    // 3c. Merge everything
+    rawHoldings.forEach(h=>{
+      const das=assetMap[h.mint]||{};
+      const pair=dexBest[h.mint];
+      const price=pair?parseFloat(pair.priceUsd)||0:0;
+
+      // Determine symbol and name — prefer DexScreener, fallback to Helius DAS
+      let symbol=pair?.baseToken?.symbol||das.symbol||"";
+      let name=pair?.baseToken?.name||das.name||"";
+      
+      // Skip tokens with no identity at all (likely spam/dust)
+      if(!symbol&&!name){
+        symbol=h.mint.slice(0,6);
+        name="Token "+h.mint.slice(0,8)+"...";
+      }
+
+      MY_TOKENS.push({
+        mint:h.mint,
+        symbol:symbol,
+        name:name,
+        price:price,
+        change24h:pair?parseFloat(pair.priceChange?.h24)||0:0,
+        mc:pair?.marketCap||0,
+        vol:pair?.volume?.h24||0,
+        fdv:pair?.fdv||0,
+        amount:h.amount,
+        usdVal:price*h.amount,
+        col:stringToColor(symbol||h.mint),
+        pairAddr:pair?.pairAddress||"",
+        img:das.img||pair?.info?.imageUrl||"",
       });
-      // Sort by USD value descending
-      MY_TOKENS.sort((a,b)=>b.usdVal-a.usdVal);
-    }catch(e){console.warn("DexScreener batch failed",e);}
+    });
+
+    // Sort: tokens with USD value first (desc), then by amount
+    MY_TOKENS.sort((a,b)=>(b.usdVal||0)-(a.usdVal||0)||(b.amount-a.amount));
+    console.log("MY_TOKENS built:",MY_TOKENS.map(t=>t.symbol+" ("+t.mint.slice(0,8)+"...) $"+t.usdVal.toFixed(2)));
   }
 
   // 4. SOL price
   try{const r=await fetch("https://api.dexscreener.com/tokens/v1/solana/So11111111111111111111111111111111111111112");const d=await r.json();if(Array.isArray(d)&&d[0])solPrice=parseFloat(d[0].priceUsd)||0;}catch(e){}
   updateSolPrice();
 
-  // 5. Generate feed posts for held tokens
+  // 5. Generate feed
   await generateFeed();
 }
 
