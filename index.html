@@ -57,6 +57,8 @@ nav{position:sticky;top:0;z-index:60;height:52px;display:flex;align-items:center
 @keyframes up{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 .post-card.x-source{border-color:rgba(29,155,240,.12);background:linear-gradient(160deg,var(--s1) 0%,rgba(29,155,240,.025) 100%)}
 .post-card.x-source:hover{border-color:rgba(29,155,240,.25)}
+.post-card.bags-source{border-color:rgba(217,119,6,.12);background:linear-gradient(160deg,var(--s1) 0%,rgba(217,119,6,.025) 100%)}
+.post-card.bags-source:hover{border-color:rgba(217,119,6,.25)}
 .x-source-tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:var(--x-dim);border:1px solid rgba(29,155,240,.15);font-size:9px;font-weight:700;color:var(--x-blue);flex-shrink:0}
 .x-handle-link{color:var(--x-blue);text-decoration:none;font-size:11px;font-weight:600}
 .x-handle-link:hover{text-decoration:underline}
@@ -184,6 +186,8 @@ nav{position:sticky;top:0;z-index:60;height:52px;display:flex;align-items:center
 // ══════════════════════════════════════════════════════════════
 const RPC="https://mainnet.helius-rpc.com/?api-key=ea4063b8-2e1b-412d-b4de-847119571603";
 const SPL_PROGRAM="TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const BAGS_API="https://public-api-v2.bags.fm/api/v1";
+const BAGS_KEY="bags_prod_ZQpPXF-kPQmLdACZ47Mu8vL9WZiEsuDkJmLykQEoKNM";
 
 let W={connected:false,pubkey:null,addrShort:null,sol:0,provider:null};
 let solPrice=0;
@@ -363,16 +367,65 @@ function stringToColor(str){
 async function generateFeed(){
   POSTS=[];
   const now=Date.now();
+  const heldMints=new Set(MY_TOKENS.map(t=>t.mint));
+
+  // 1. Check Bags Launch Feed for user's held tokens
+  let bagsLaunches=[];
+  try{
+    const r=await fetch(BAGS_API+"/token-launch/feed",{headers:{"x-api-key":BAGS_KEY}});
+    const d=await r.json();
+    if(d.success&&Array.isArray(d.response)){
+      bagsLaunches=d.response.filter(l=>heldMints.has(l.tokenMint));
+    }
+  }catch(e){console.warn("Bags feed fetch failed",e);}
+
+  // 2. Check Bags pool data for held tokens
+  let bagsPools={};
+  for(const tok of MY_TOKENS.slice(0,5)){ // top 5 by value
+    try{
+      const r=await fetch(BAGS_API+"/state/bags-pool/"+tok.mint,{headers:{"x-api-key":BAGS_KEY}});
+      const d=await r.json();
+      if(d.success&&d.response) bagsPools[tok.mint]=d.response;
+    }catch(e){}
+  }
+
+  // 3. Generate posts per token
   MY_TOKENS.forEach((tok,i)=>{
     const up=tok.change24h>=0;
-    // Post 1: Price action from X-style source
+    const bagsLaunch=bagsLaunches.find(l=>l.tokenMint===tok.mint);
+    const bagsPool=bagsPools[tok.mint];
+
+    // Bags Launch post (if token is a Bags launch)
+    if(bagsLaunch){
+      POSTS.push({
+        id:now+i*100+0, source:"bags", tok:tok,
+        xUser:"BagsApp", xName:"Bags Launch",
+        body:"$"+tok.symbol+" launched on Bags. "+(bagsLaunch.description||tok.name)+". Trade and earn fees on every transaction via Bags fee sharing.",
+        ts:now-(i*1200000+60000), li:Math.floor(Math.random()*400)+100, co:Math.floor(Math.random()*60)+10, re:Math.floor(Math.random()*50)+5, liked:false,
+        isBags:true
+      });
+    }
+
+    // Bags Pool analytics post
+    if(bagsPool){
+      POSTS.push({
+        id:now+i*100+4, source:"bags", tok:tok,
+        xUser:"BagsApp", xName:"Bags Analytics",
+        body:"$"+tok.symbol+" Bags pool active. Fee sharing enabled — holders earn from every trade. Check your claimable positions on bags.fm.",
+        ts:now-(i*1800000+400000), li:Math.floor(Math.random()*200)+50, co:Math.floor(Math.random()*30)+5, re:Math.floor(Math.random()*20)+3, liked:false,
+        isBags:true
+      });
+    }
+
+    // Price action post
     POSTS.push({
       id:now+i*100+1, source:"x", tok:tok,
       xUser:tok.symbol+"_sol", xName:tok.name,
       body:"$"+tok.symbol+" "+(up?"up":"down")+" "+(up?"+":"")+tok.change24h.toFixed(1)+"% in 24h. "+(up?"Momentum building.":"Dip opportunity?")+(" MCap: $"+fmtMc(tok.mc)+". Volume: $"+fmtMc(tok.vol)+"."),
       ts:now-(i*1800000+300000), li:Math.floor(Math.random()*300)+50, co:Math.floor(Math.random()*50)+5, re:Math.floor(Math.random()*40)+3, liked:false
     });
-    // Post 2: CA share post
+
+    // DexScreener activity post
     if(tok.price>0){
       POSTS.push({
         id:now+i*100+2, source:"x", tok:tok,
@@ -381,7 +434,8 @@ async function generateFeed(){
         ts:now-(i*1800000+900000), li:Math.floor(Math.random()*200)+30, co:Math.floor(Math.random()*30)+3, re:Math.floor(Math.random()*20)+2, liked:false
       });
     }
-    // Post 3: Community post
+
+    // Community holder post
     POSTS.push({
       id:now+i*100+3, source:"native", tok:tok,
       body:"Holding "+fmtAmount(tok.amount)+" $"+tok.symbol+" and not selling. "+(up?"Chart looking strong, next resistance level coming up.":"Accumulating at these levels. Diamond hands."),
@@ -413,10 +467,16 @@ function sparkline(tok,w,h){const pts=[];let v=(tok.price||1)*.9;for(let i=0;i<1
 function renderPost(post,idx){
   const tok=post.tok;
   const isX=post.source==="x";
+  const isBags=post.source==="bags";
   const up=tok.change24h>=0;
 
+  // Card class
+  const cardClass=isBags?"post-card bags-source":isX?"post-card x-source":"post-card";
+
   let hd;
-  if(isX){
+  if(isBags){
+    hd='<div class="post-head"><div class="av" style="width:36px;height:36px;background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.2);color:#d97706;font-size:12px;font-weight:700">B</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="post-name">'+post.xName+'</span><a href="https://bags.fm" target="_blank" style="color:#d97706;text-decoration:none;font-size:11px;font-weight:600">bags.fm</a><span class="post-handle">· '+fmtTs(post.ts)+'</span></div></div><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:rgba(217,119,6,.08);border:1px solid rgba(217,119,6,.15);font-size:9px;font-weight:700;color:#d97706;flex-shrink:0">⬡ Bags</span><div class="tok-tag" style="background:'+tok.col+'18;border:1px solid '+tok.col+'35;color:'+tok.col+'">$'+tok.symbol+'</div></div>';
+  }else if(isX){
     hd='<div class="post-head"><div class="av" style="width:36px;height:36px;background:var(--x-dim);border:1px solid rgba(29,155,240,.2);color:var(--x-blue);font-size:14px">𝕏</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="post-name">'+post.xName+'</span><a href="https://x.com/search?q=%24'+tok.symbol+'" target="_blank" class="x-handle-link">@'+post.xUser+'</a><span class="post-handle">· '+fmtTs(post.ts)+'</span></div></div><span class="x-source-tag">𝕏 via X</span><div class="tok-tag" style="background:'+tok.col+'18;border:1px solid '+tok.col+'35;color:'+tok.col+'">$'+tok.symbol+'</div></div>';
   }else{
     hd='<div class="post-head"><div class="av" style="width:36px;height:36px;background:'+tok.col+'14;border:1px solid '+tok.col+'28;color:'+tok.col+';font-size:11px">'+tok.symbol.slice(0,2)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><span class="post-name">'+tok.symbol+' Holder</span><span class="post-handle">· '+fmtTs(post.ts)+'</span></div></div><div class="tok-tag" style="background:'+tok.col+'18;border:1px solid '+tok.col+'35;color:'+tok.col+'">$'+tok.symbol+'</div></div>';
@@ -426,15 +486,16 @@ function renderPost(post,idx){
 
   const prW=tok.price>0?'<div class="price-w"><div class="pw-ico" style="background:'+tok.col+'14;border:1px solid '+tok.col+'28;color:'+tok.col+';font-size:9px;font-weight:700">$</div><div style="flex:1"><div style="font-size:10px;font-family:var(--fm);color:var(--text2)">$'+tok.symbol+' / USD</div><div class="pw-price">'+fmtP(tok.price)+'</div></div><div style="text-align:right;margin:0 8px"><div class="pw-chg '+(up?"up-col":"dn-col")+'">'+(up?"+":"")+tok.change24h.toFixed(1)+'%</div><div style="font-size:10px;color:var(--text2)">MCap $'+fmtMc(tok.mc)+'</div></div>'+sparkline(tok,88,32)+'</div>':'';
 
-  const xLink=isX?'<a href="https://x.com/search?q=%24'+tok.symbol+'+OR+'+tok.mint.slice(0,8)+'" target="_blank" style="margin-left:auto;font-size:10px;color:var(--x-blue);text-decoration:none;font-family:var(--fm);opacity:.7">Search on 𝕏 ↗</a>':'<span style="margin-left:auto;font-size:10px;color:var(--text3);font-family:var(--fm)">'+W.addrShort+'</span>';
+  const xLink=isBags?'<a href="https://bags.fm" target="_blank" style="margin-left:auto;font-size:10px;color:#d97706;text-decoration:none;font-family:var(--fm);opacity:.7">Trade on Bags ↗</a>':isX?'<a href="https://x.com/search?q=%24'+tok.symbol+'+OR+'+tok.mint.slice(0,8)+'" target="_blank" style="margin-left:auto;font-size:10px;color:var(--x-blue);text-decoration:none;font-family:var(--fm);opacity:.7">Search on 𝕏 ↗</a>':'<span style="margin-left:auto;font-size:10px;color:var(--text3);font-family:var(--fm)">'+W.addrShort+'</span>';
 
-  return '<div class="post-card '+(isX?"x-source":"")+'" style="animation-delay:'+idx*.03+'s">'+hd+'<p class="post-body">'+post.body+'</p>'+caW+prW+'<div class="actions"><button class="act '+(post.liked?"liked":"")+'" onclick="likePost('+post.id+')"><span style="font-size:13px">'+(post.liked?"♥":"♡")+'</span><span class="act-n">'+post.li+'</span></button><button class="act"><span style="font-size:12px">◻</span><span class="act-n">'+post.co+'</span></button><button class="act"><span style="font-size:12px">↺</span><span class="act-n">'+post.re+'</span></button><button class="act" onclick="toast(\'Link copied\',\'s\')"><span style="font-size:12px">↗</span></button>'+xLink+'</div></div>';
+  return '<div class="'+cardClass+'" style="animation-delay:'+idx*.03+'s">'+hd+'<p class="post-body">'+post.body+'</p>'+caW+prW+'<div class="actions"><button class="act '+(post.liked?"liked":"")+'" onclick="likePost('+post.id+')"><span style="font-size:13px">'+(post.liked?"♥":"♡")+'</span><span class="act-n">'+post.li+'</span></button><button class="act"><span style="font-size:12px">◻</span><span class="act-n">'+post.co+'</span></button><button class="act"><span style="font-size:12px">↺</span><span class="act-n">'+post.re+'</span></button><button class="act" onclick="toast(\'Link copied\',\'s\')"><span style="font-size:12px">↗</span></button>'+xLink+'</div></div>';
 }
 
 function renderTabs(){
   if(!W.connected||MY_TOKENS.length===0)return'';
   let html='<button class="tab '+(S.tab==="all"?"active":"")+'" style="'+(S.tab==="all"?"border-bottom-color:var(--accent)":"")+'" onclick="setTab(\'all\')">My Feed</button>';
   html+='<button class="tab '+(S.tab==="x"?"active":"")+'" style="'+(S.tab==="x"?"border-bottom-color:var(--x-blue)":"")+'" onclick="setTab(\'x\')">𝕏 Feed</button>';
+  html+='<button class="tab '+(S.tab==="bags"?"active":"")+'" style="'+(S.tab==="bags"?"border-bottom-color:#d97706":"")+'" onclick="setTab(\'bags\')">⬡ Bags</button>';
   MY_TOKENS.forEach(tok=>{
     const active=S.activeMint===tok.mint;
     html+='<button class="tab '+(active?"active":"")+'" style="'+(active?"border-bottom-color:"+tok.col:"")+'" onclick="setMint(\''+tok.mint+'\')">$'+tok.symbol+'</button>';
@@ -474,6 +535,7 @@ function renderSidebar(){
 function getFilteredPosts(){
   let r=[...POSTS];
   if(S.tab==="x")r=r.filter(p=>p.source==="x");
+  else if(S.tab==="bags")r=r.filter(p=>p.source==="bags");
   if(S.activeMint)r=r.filter(p=>p.tok.mint===S.activeMint);
   return r;
 }
